@@ -14,32 +14,41 @@ namespace TaskDiGiunone
         int turno;
         int count;
         SemaphoreSlim semaforoPazienti;
+        SemaphoreSlim semaforoCount;
+        SemaphoreSlim semaforoDim;
 
         public CTerme(int n) 
         {
             this.n = n;
             turno = 0;
             count = 0;
-            semaforoPazienti = new(1, n);
+            semaforoPazienti = new SemaphoreSlim(n, n);
+            semaforoCount = new SemaphoreSlim(1, 1);
+            semaforoDim = new SemaphoreSlim(1, 1);
+        }
+
+        async Task<bool> CanGo(bool orto)
+        {
+            if ((orto && turno == 2) || (!orto && turno == 1))
+                return false;
+            else
+                return true;
         }
 
         async Task Attendi(bool orto)
         {
             // Attende il proprio turno
-            if (orto)
-                do
-                {
-                    await semaforoPazienti.WaitAsync();
-                    if (turno == 2)
-                        semaforoPazienti.Release();
-                } while (turno == 2);
-            else
-                do
-                {
-                    await semaforoPazienti.WaitAsync();
-                    if (turno == 1)
-                        semaforoPazienti.Release();
-                } while (turno == 1);
+            bool canGo;
+
+            do
+            {
+                await semaforoPazienti.WaitAsync();
+
+                canGo = CanGo(orto).GetAwaiter().GetResult();
+
+                if (!canGo)
+                    semaforoPazienti.Release();
+            } while (!canGo);
         }
 
         public async Task AccediPiscina(bool orto)
@@ -48,10 +57,11 @@ namespace TaskDiGiunone
 
             await Attendi(orto);
 
-            await Task.Delay(rand.Next(100, 200));
+            // Solo uno alla volta può entrare qui
+            await semaforoCount.WaitAsync();
 
             // Se libero
-            if (turno == 0) 
+            if (turno == 0)
             {
                 if (orto)
                 {
@@ -65,14 +75,15 @@ namespace TaskDiGiunone
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine("\nInfettivo inizia!");
                 }
-
-                semaforoPazienti.Release(n - 1);
             }
 
-            if ((orto && turno == 2) || (!orto && turno == 1) || turno == 0) 
+            semaforoCount.Release();
+
+            if (!CanGo(orto).GetAwaiter().GetResult())
             {
                 semaforoPazienti.Release();
-                await Attendi(orto);
+                await AccediPiscina(orto);
+                return;
             }
 
             if (orto)
@@ -82,25 +93,22 @@ namespace TaskDiGiunone
 
             count++; // Aggiunge iuser dalla psicina
 
-            await Task.Delay(rand.Next(2000, 3000));
+            await Task.Delay(rand.Next(5));
 
-            count--; // Libera iuser dalla psicina
+            await semaforoDim.WaitAsync();
 
-            Console.WriteLine($"Qualcuno esce! Rimasti: meglio non saperlo");
+            int copy = --count; // Libera iuser dalla psicina
 
-            await Task.Delay(rand.Next(1000));
+            Console.WriteLine($"Qualcuno esce! Rimasti: {copy}");
 
-            if (count == 0)
-                turno = 0;
-            
-            try
+            if (count == 0) 
             {
-                if (turno != 0)
-                    semaforoPazienti.Release();
+                turno = 0;
             }
-            catch{
-                return;
-            }
+
+            semaforoDim.Release();
+              
+            semaforoPazienti.Release();
         }
     }
 }
